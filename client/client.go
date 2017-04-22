@@ -54,8 +54,11 @@ import (
 	"strings"
 
 	"github.com/docker/docker/api"
+	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/versions"
 	"github.com/docker/go-connections/sockets"
 	"github.com/docker/go-connections/tlsconfig"
+	"golang.org/x/net/context"
 )
 
 // Client is the API client that performs all operations
@@ -218,10 +221,37 @@ func (cli *Client) ClientVersion() string {
 // UpdateClientVersion updates the version string associated with this
 // instance of the Client. This operation doesn't acquire a mutex.
 func (cli *Client) UpdateClientVersion(v string) {
+	// If no version specified, negotiate with the server
+	if v == "" {
+		cli.DowngradeClientVersion()
+	}
 	if !cli.manualOverride {
 		cli.version = v
 	}
 
+}
+
+// DowngradeClientVersion downgrades the version string associated with this
+// instance of the Client to match the latest version the server supports
+func (cli *Client) DowngradeClientVersion() {
+	ping, _ := cli.Ping(context.Background())
+	cli.DowngradeClientVersionPing(ping)
+}
+
+// DowngradeClientVersionPing downgrades the version string associated with this
+// instance of the Client to match the latest version the server supports
+func (cli *Client) DowngradeClientVersionPing(p types.Ping) {
+
+	// try the latest version before versioning headers existed
+	if p.APIVersion == "" {
+		p.APIVersion = "1.24"
+	}
+
+	// if server version is lower than the current cli, downgrade
+	// note that UpdateClientVersion enforces cli.manualOverride
+	if versions.LessThan(p.APIVersion, cli.ClientVersion()) {
+		cli.UpdateClientVersion(p.APIVersion)
+	}
 }
 
 // ParseHost verifies that the given host strings is valid.

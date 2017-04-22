@@ -246,18 +246,16 @@ func TestUpdateClientVersion(t *testing.T) {
 }
 
 func TestNewEnvClientSetsDefaultVersion(t *testing.T) {
-	// Unset environment variables
-	envVarKeys := []string{
-		"DOCKER_HOST",
-		"DOCKER_API_VERSION",
-		"DOCKER_TLS_VERIFY",
-		"DOCKER_CERT_PATH",
+	env := EnvToMap()
+	defer MapToEnv(env)
+
+	envMap := map[string]string{
+		"DOCKER_HOST":        "",
+		"DOCKER_API_VERSION": "",
+		"DOCKER_TLS_VERIFY":  "",
+		"DOCKER_CERT_PATH":   "",
 	}
-	envVarValues := make(map[string]string)
-	for _, key := range envVarKeys {
-		envVarValues[key] = os.Getenv(key)
-		os.Setenv(key, "")
-	}
+	MapToEnv(envMap)
 
 	client, err := NewEnvClient()
 	if err != nil {
@@ -276,9 +274,117 @@ func TestNewEnvClientSetsDefaultVersion(t *testing.T) {
 	if client.version != expected {
 		t.Fatalf("Expected %s, got %s", expected, client.version)
 	}
+}
 
-	// Restore environment variables
-	for _, key := range envVarKeys {
-		os.Setenv(key, envVarValues[key])
+// TestDowngradeVersionEmpty asserts that client.Client can
+// negotiate a compatible APIVersion when omitted
+func TestDowngradeVersionEmpty(t *testing.T) {
+	env := EnvToMap()
+	defer MapToEnv(env)
+
+	envMap := map[string]string{
+		"DOCKER_API_VERSION": "",
 	}
+	MapToEnv(envMap)
+
+	client, err := NewEnvClient()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ping := types.Ping{
+		APIVersion:   "",
+		OSType:       "linux",
+		Experimental: false,
+	}
+
+	// set our version to something new
+	client.UpdateClientVersion("1.25")
+
+	// if no version from server, expect the earliest
+	// version before APIVersion was implemented
+	expected := "1.24"
+
+	// test downgrade
+	client.DowngradeClientVersionPing(ping)
+	if client.version != expected {
+		t.Fatalf("Expected %s, got %s", expected, client.version)
+	}
+}
+
+// TestDowngradeVersion asserts that client.Client can
+// negotiate a compatible APIVersion with the server
+func TestDowngradeVersion(t *testing.T) {
+	client, err := NewEnvClient()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expected := "1.21"
+
+	ping := types.Ping{
+		APIVersion:   expected,
+		OSType:       "linux",
+		Experimental: false,
+	}
+
+	// set our version to something new
+	client.UpdateClientVersion("1.22")
+
+	// test downgrade
+	client.DowngradeClientVersionPing(ping)
+	if client.version != expected {
+		t.Fatalf("Expected %s, got %s", expected, client.version)
+	}
+}
+
+// TestUpdateClientOverride asserts that client.ClientOverride
+// honors the environment variable DOCKER_API_VERSION
+func TestUpdateClientOverride(t *testing.T) {
+	env := EnvToMap()
+	defer MapToEnv(env)
+
+	envMap := map[string]string{
+		"DOCKER_API_VERSION": "9.99",
+	}
+	MapToEnv(envMap)
+
+	client, err := NewEnvClient()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ping := types.Ping{
+		APIVersion:   "",
+		OSType:       "linux",
+		Experimental: false,
+	}
+
+	// set our version to something different
+	client.UpdateClientVersion("1.24")
+	expected := envMap["DOCKER_API_VERSION"]
+
+	// test that UpdateClient honored the env var
+	client.DowngradeClientVersionPing(ping)
+	if client.version != expected {
+		t.Fatalf("Expected %s, got %s", expected, client.version)
+	}
+}
+
+// MapToEnv takes a map of environment variables and sets them
+func MapToEnv(env map[string]string) {
+	for k, v := range env {
+		os.Setenv(k, v)
+	}
+}
+
+// EnvToMap returns a map of environment variables
+func EnvToMap() map[string]string {
+	env := make(map[string]string)
+	for _, e := range os.Environ() {
+		kv := strings.SplitAfterN(e, "=", 2)
+		env[kv[0]] = kv[1]
+	}
+
+	return env
 }

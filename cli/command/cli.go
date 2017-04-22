@@ -10,7 +10,6 @@ import (
 
 	"github.com/docker/docker/api"
 	"github.com/docker/docker/api/types"
-	"github.com/docker/docker/api/types/versions"
 	cliconfig "github.com/docker/docker/cli/config"
 	"github.com/docker/docker/cli/config/configfile"
 	"github.com/docker/docker/cli/config/credentials"
@@ -186,22 +185,17 @@ func (cli *DockerCli) Initialize(opts *cliflags.ClientOptions) error {
 		cli.keyFile = opts.Common.TrustKey
 	}
 
-	if ping, err := cli.client.Ping(context.Background()); err == nil {
-		cli.server = ServerInfo{
-			HasExperimental: ping.Experimental,
-			OSType:          ping.OSType,
-		}
-
-		// since the new header was added in 1.25, assume server is 1.24 if header is not present.
-		if ping.APIVersion == "" {
-			ping.APIVersion = "1.24"
-		}
-
-		// if server version is lower than the current cli, downgrade
-		if versions.LessThan(ping.APIVersion, cli.client.ClientVersion()) {
-			cli.client.UpdateClientVersion(ping.APIVersion)
-		}
+	ping, err := cli.client.Ping(context.Background())
+	if err != nil {
+		return err
 	}
+
+	cli.server = ServerInfo{
+		HasExperimental: ping.Experimental,
+		OSType:          ping.OSType,
+	}
+
+	cli.client.UpdateClientVersion("")
 
 	return nil
 }
